@@ -7,11 +7,14 @@ pub(crate) const LASSO_MAX_ITERS: usize = 1_000;
 pub(crate) const LASSO_TOLERANCE: f64 = 1e-6;
 
 pub(crate) fn solve_linear(design: &DMatrix<f64>, target: &DVector<f64>) -> Result<DVector<f64>> {
-    design
-        .clone()
-        .qr()
-        .solve(target)
-        .ok_or_else(|| anyhow!("failed to solve normal equations; design matrix may be singular"))
+    let gram = design.transpose() * design;
+    let rhs = design.transpose() * target;
+
+    let chol = gram
+        .cholesky()
+        .ok_or_else(|| anyhow!("failed to factor design matrix; columns may be collinear"))?;
+
+    Ok(chol.solve(&rhs))
 }
 
 pub(crate) fn solve_ridge(
@@ -155,5 +158,73 @@ fn soft_threshold(value: f64, alpha: f64) -> f64 {
         value + alpha
     } else {
         0.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use approx::assert_abs_diff_eq;
+
+    fn sample_design_and_target() -> (DMatrix<f64>, DVector<f64>) {
+        let design = DMatrix::from_row_slice(3, 2, &[1.0, 0.0, 1.0, 1.0, 1.0, 2.0]);
+        let target = DVector::from_vec(vec![1.0, 3.0, 5.0]);
+        (design, target)
+    }
+
+    #[test]
+    fn solve_linear_recovers_exact_coefficients() {
+        let (design, target) = sample_design_and_target();
+        let beta = solve_linear(&design, &target).expect("ols solution");
+
+        assert_abs_diff_eq!(beta[0], 1.0, epsilon = 1e-10);
+        assert_abs_diff_eq!(beta[1], 2.0, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn solve_ridge_shrinks_feature_weight() {
+        let (design, target) = sample_design_and_target();
+        let beta = solve_ridge(&design, &target, 1.0).expect("ridge solution");
+
+        assert_abs_diff_eq!(beta[0], 5.0 / 3.0, epsilon = 1e-10);
+        assert_abs_diff_eq!(beta[1], 4.0 / 3.0, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn solve_lasso_zeroes_coefficients_when_alpha_large() {
+        let (design, target) = sample_design_and_target();
+        let beta = solve_lasso(&design, &target, 10.0).expect("lasso solution");
+
+        assert_abs_diff_eq!(beta[0], 3.0, epsilon = 1e-6);
+        assert_abs_diff_eq!(beta[1], 0.0, epsilon = 1e-6);
+    }
+
+    #[test]
+    fn compute_metrics_handles_perfect_fit() {
+        let actual = DVector::from_vec(vec![1.0, 3.0, 5.0]);
+        let predicted = actual.clone();
+        let metrics = compute_metrics(&actual, &predicted, 1).expect("metrics");
+
+        assert_abs_diff_eq!(metrics.r2, 1.0, epsilon = 1e-12);
+        assert_eq!(metrics.adj_r2, Some(1.0));
+        assert_abs_diff_eq!(metrics.rmse, 0.0, epsilon = 1e-12);
+        assert_abs_diff_eq!(metrics.mae, 0.0, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn compute_metrics_rejects_zero_variance_targets() {
+        let actual = DVector::from_vec(vec![2.0, 2.0, 2.0]);
+        let predicted = DVector::from_vec(vec![1.0, 2.0, 3.0]);
+        let err = compute_metrics(&actual, &predicted, 1).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("target column has zero variance; regression is undefined"));
+    }
+
+    #[test]
+    fn soft_threshold_behaves_as_expected() {
+        assert_abs_diff_eq!(super::soft_threshold(5.0, 2.0), 3.0);
+        assert_abs_diff_eq!(super::soft_threshold(-5.0, 2.0), -3.0);
+        assert_abs_diff_eq!(super::soft_threshold(1.5, 2.0), 0.0);
     }
 }

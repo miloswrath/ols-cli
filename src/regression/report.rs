@@ -4,6 +4,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 
+use super::diagnostics::{InfluenceDiagnostics, ResidualSummary};
 use crate::ModelKind;
 
 #[derive(Debug, Clone)]
@@ -32,6 +33,8 @@ pub struct RegressionReport {
     pub(crate) coefficients: Vec<(String, f64)>,
     pub(crate) metrics: RegressionMetrics,
     pub(crate) scaling: Option<Vec<FeatureScaling>>,
+    pub(crate) residuals: ResidualSummary,
+    pub(crate) diagnostics: Option<InfluenceDiagnostics>,
     pub(crate) notes: Vec<String>,
 }
 
@@ -45,6 +48,8 @@ impl RegressionReport {
         coefficients: Vec<(String, f64)>,
         metrics: RegressionMetrics,
         scaling: Option<Vec<FeatureScaling>>,
+        residuals: ResidualSummary,
+        diagnostics: Option<InfluenceDiagnostics>,
         notes: Vec<String>,
     ) -> Self {
         Self {
@@ -57,6 +62,8 @@ impl RegressionReport {
             coefficients,
             metrics,
             scaling,
+            residuals,
+            diagnostics,
             notes,
         }
     }
@@ -89,9 +96,45 @@ impl RegressionReport {
         lines.push(format!("  MAE: {:.6}", self.metrics.mae));
 
         lines.push(String::new());
+        lines.push("Residuals:".to_string());
+        lines.push(format!("  Mean: {:.6}", self.residuals.mean));
+        lines.push(format!("  Std Dev: {:.6}", self.residuals.std_dev));
+        lines.push(format!("  Min: {:.6}", self.residuals.min));
+        lines.push(format!("  Max: {:.6}", self.residuals.max));
+        lines.push(format!("  Max |residual|: {:.6}", self.residuals.max_abs));
+
+        lines.push(String::new());
         lines.push("Coefficients:".to_string());
         for (name, value) in &self.coefficients {
             lines.push(format!("  {:<15} {:>12.6}", name, value));
+        }
+
+        if let Some(diag) = &self.diagnostics {
+            lines.push(String::new());
+            lines.push("Influence diagnostics (OLS):".to_string());
+            lines.push(format!(
+                "  Leverage threshold: {:.6}",
+                diag.leverage_threshold
+            ));
+            if diag.leverage.is_empty() {
+                lines.push("  No leverage values computed.".to_string());
+            } else {
+                for (row, value) in &diag.leverage {
+                    lines.push(format!("  Row {:>3} leverage: {:.6}", row, value));
+                }
+            }
+
+            lines.push(format!(
+                "  Cook's distance threshold: {:.6}",
+                diag.cooks_threshold
+            ));
+            if diag.cooks_distance.is_empty() {
+                lines.push("  No Cook's distance values computed.".to_string());
+            } else {
+                for (row, value) in &diag.cooks_distance {
+                    lines.push(format!("  Row {:>3} Cook's D: {:.6}", row, value));
+                }
+            }
         }
 
         if let Some(scaling) = &self.scaling {

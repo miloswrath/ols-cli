@@ -1,3 +1,4 @@
+mod diagnostics;
 mod preprocess;
 mod report;
 mod solve;
@@ -11,6 +12,7 @@ use nalgebra::DVector;
 use crate::config::{default_alpha, RunConfig};
 use crate::ModelKind;
 
+pub use diagnostics::{InfluenceDiagnostics, ResidualSummary};
 pub use report::{FeatureScaling, RegressionMetrics, RegressionReport};
 
 pub fn fit_least_squares(config: &RunConfig) -> Result<RegressionReport> {
@@ -132,7 +134,27 @@ pub fn fit_least_squares(config: &RunConfig) -> Result<RegressionReport> {
     };
 
     let predictions = &design * &coefficients;
+    let residual_vector = &target_vector - &predictions;
     let metrics = solve::compute_metrics(&target_vector, &predictions, config.features.len())?;
+    let residual_summary = diagnostics::summarize_residuals(&residual_vector);
+
+    let mut notes = Vec::new();
+
+    let diagnostics = if config.model == ModelKind::Linear {
+        match diagnostics::leverage_and_influence(&design, &residual_vector)? {
+            Some(diag) => Some(diag),
+            None => {
+                notes.push(
+                    "Leverage diagnostics unavailable (singular design or insufficient degrees of freedom)."
+                        .to_string(),
+                );
+                None
+            }
+        }
+    } else {
+        notes.push("Influence diagnostics skipped for regularized models.".to_string());
+        None
+    };
 
     let mut coefficient_labels = Vec::with_capacity(config.features.len() + 1);
     coefficient_labels.push("intercept".to_string());
@@ -143,7 +165,6 @@ pub fn fit_least_squares(config: &RunConfig) -> Result<RegressionReport> {
         .zip(coefficients.iter().copied())
         .collect();
 
-    let mut notes = Vec::new();
     if config.normalize {
         notes.push("Features normalized to zero mean and unit variance.".to_string());
     }
@@ -164,6 +185,113 @@ pub fn fit_least_squares(config: &RunConfig) -> Result<RegressionReport> {
         coefficient_pairs,
         metrics,
         scaling,
+        residual_summary,
+        diagnostics,
         notes,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{RunConfig, DEFAULT_LASSO_ALPHA, DEFAULT_RIDGE_ALPHA};
+    use approx::assert_abs_diff_eq;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    fn write_dataset(contents: &str) -> NamedTempFile {
+        let mut file = NamedTempFile::new().expect("temp file");
+        write!(file, "{}", contents).expect("write temp dataset");
+        file.flush().expect("flush temp dataset");
+        file
+    }
+
+    fn base_config(dataset: &NamedTempFile) -> RunConfig {
+        RunConfig {
+            dataset: dataset.path().to_path_buf(),
+            target: "target".to_string(),
+            features: vec!["feature".to_string()],
+            model: ModelKind::Linear,
+            alpha: None,
+            normalize: false,
+            output: None,
+            dry_run: false,
+        }
+    }
+
+    #[test]
+    fn linear_fit_recovers_expected_coefficients() {
+        let dataset = write_dataset("target,feature\n1,0\n3,1\n5,2\n7,3\n");
+        let config = base_config(&dataset);
+        config.validate().expect("valid config");
+
+        let report = fit_least_squares(&config).expect("fit should succeed");
+        assert_eq!(report.rows, 4);
+        assert_abs_diff_eq!(report.coefficients[0].1, 1.0, epsilon = 1e-10);
+        assert_abs_diff_eq!(report.coefficients[1].1, 2.0, epsilon = 1e-10);
+        assert_abs_diff_eq!(report.metrics.r2, 1.0, epsilon = 1e-12);
+        assert!(report.diagnostics.is_none());
+        assert!(report
+            .notes
+            .iter()
+            .any(|note| note.contains("Leverage diagnostics unavailable")));
+    }
+
+    #[test]
+    fn ridge_fit_uses_default_alpha_and_shrinks_feature() {
+        let dataset = write_dataset("target,feature\n1,0\n3,1\n5,2\n7,3\n");
+        let mut config = base_config(&dataset);
+        config.model = ModelKind::Ridge;
+        config = config.with_defaults();
+        config.validate().expect("valid ridge config");
+
+        let report = fit_least_squares(&config).expect("ridge fit");
+        assert_eq!(report.alpha, Some(DEFAULT_RIDGE_ALPHA));
+        assert_abs_diff_eq!(report.coefficients[0].1, 1.5, epsilon = 1e-10);
+        assert_abs_diff_eq!(report.coefficients[1].1, 5.0 / 3.0, epsilon = 1e-10);
+        assert!(report.notes.iter().any(|note| note.contains("regularized")));
+    }
+
+    #[test]
+    fn lasso_with_large_alpha_drives_feature_to_zero() {
+        let dataset = write_dataset("target,feature\n1,0\n3,1\n5,2\n7,3\n");
+        let mut config = base_config(&dataset);
+        config.model = ModelKind::Lasso;
+        config.alpha = Some(10.0);
+        config = config.with_defaults();
+        config.validate().expect("valid lasso config");
+
+        let report = fit_least_squares(&config).expect("lasso fit");
+        assert_eq!(report.alpha, Some(10.0));
+        assert_abs_diff_eq!(report.coefficients[0].1, 4.0, epsilon = 1e-6);
+        assert_abs_diff_eq!(report.coefficients[1].1, 0.0, epsilon = 1e-6);
+        assert!(report
+            .notes
+            .iter()
+            .any(|note| note.contains("Lasso solved via coordinate descent")));
+    }
+
+    #[test]
+    fn lasso_uses_default_alpha_when_missing() {
+        let dataset = write_dataset("target,feature\n1,0\n3,1\n5,2\n7,3\n");
+        let mut config = base_config(&dataset);
+        config.model = ModelKind::Lasso;
+        config = config.with_defaults();
+        config.validate().expect("valid config");
+
+        let report = fit_least_squares(&config).expect("lasso fit");
+        assert_eq!(report.alpha, Some(DEFAULT_LASSO_ALPHA));
+    }
+
+    #[test]
+    fn fit_fails_when_feature_has_no_variance() {
+        let dataset = write_dataset("target,feature\n1,2\n3,2\n5,2\n");
+        let config = base_config(&dataset);
+        config.validate().expect("valid config");
+
+        let err = fit_least_squares(&config).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("feature 'feature' has zero variance across dataset"));
+    }
 }

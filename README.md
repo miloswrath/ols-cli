@@ -32,9 +32,29 @@ The current implementation prints a configuration summary followed by a report s
 - Model variant in use (linear, ridge, lasso)
 - Number of rows detected in the dataset
 - Feature and target column names
+- Residual summary statistics and top leverage/Cook's distance scores (OLS only)
 - Notes highlighting missing functionality or inferred defaults
 
 If you pass `--output path/to/report.txt`, the same report is written to disk.
+
+## Sample Data
+
+A `data/` directory contains small, numerically stable CSV fixtures you can run through the CLI while the solver is under construction:
+
+- `data/boston_housing/housing_sample.csv` - residential pricing snapshot with `price` as the target. Try linear regression:
+  ```bash
+  cargo run -- fit data/boston_housing/housing_sample.csv --target price --features bedrooms,bathrooms,sqft,age --model linear
+  ```
+- `data/energy_efficiency/process_yield.csv` - synthetic process data that benefits from ridge regularization and normalization:
+  ```bash
+  cargo run -- fit data/energy_efficiency/process_yield.csv --target yield --features temperature,pressure,catalyst,time_on_stream --model ridge --alpha 2.0 --normalize
+  ```
+- `data/marketing_mix/ad_performance.csv` - marketing spend example highlighting sparse coefficients under lasso:
+  ```bash
+  cargo run -- fit data/marketing_mix/ad_performance.csv --target sales --features tv,radio,social,email --model lasso --alpha 0.4
+  ```
+
+Each dataset is intentionally small (6–8 rows) so you can inspect the CSVs, tweak feature sets, and exercise different code paths like normalization, explicit alphas, and per-model notes without a lengthy run.
 
 ## Command Reference
 
@@ -55,9 +75,9 @@ Run `cargo run -- --help` to view global help and `cargo run -- fit --help` for 
 - `src/main.rs` ties the binary entry point to the library crate.
 - `src/cli.rs` defines the Clap-powered interface.
 - `src/config.rs` converts CLI arguments into a validated runtime configuration and fills default hyperparameters.
-- `src/regression.rs` contains the dataset inspection pass and report scaffolding.
+- `src/regression/` contains preprocessing, solver, diagnostics, and reporting modules.
 
-The code is organized so that the regression engine can live in `regression.rs` (or a sub-module) while CLI/UX logic remains separate.
+The code is organized so that regression logic stays in `src/regression/` while CLI/UX layers remain separate.
 
 ## Development Workflow
 
@@ -67,26 +87,26 @@ The code is organized so that the regression engine can live in `regression.rs` 
 
 ## Roadmap
 
-1. **Model metrics and diagnostics**
-   - Compute R², adjusted R², RMSE, MAE, and residual summaries.
-   - Generate leverage and influence diagnostics for OLS.
-2. **Config and experiment management**
+1. **Config and experiment management**
    - Support loading hyperparameters from `toml`/`yaml` configs in addition to CLI flags.
    - Emit machine-readable reports (JSON) for downstream tooling.
-3. **Prediction mode**
+2. **Prediction mode**
    - Allow loading a trained model artifact and applying it to new data.
    - Surface prediction intervals where applicable.
-4. **Testing and quality gates**
+3. **Testing and quality gates**
    - Add property-based tests for the solver.
    - Introduce integration fixtures with synthetic datasets to guard against regressions.
-5. **Developer ergonomics**
+4. **Developer ergonomics**
    - Add `cargo xtask` commands for sample data generation and benchmark runs.
    - Package the binary via `cargo install` and provide release artifacts.
-6. **Cross-validation and model selection**
+5. **Cross-validation and model selection**
    - Add k-fold cross-validation to estimate generalization error.
    - Provide grid/random search helpers for tuning regularization strengths.
-7. **CLI UX enhancements**
+6. **CLI UX enhancements**
    - Offer interactive prompts for column selection when flags are omitted.
    - Support templated report output (markdown/HTML) for easier sharing.
+7. **Diagnostics visualization**
+   - Stream residual, leverage, and Cook's distance tables to CSV for quick plotting.
+   - Provide opt-in ASCII sparkline summaries for at-a-glance trend inspection.
 
 Contributions and refinements to this roadmap are welcome as requirements solidify.
