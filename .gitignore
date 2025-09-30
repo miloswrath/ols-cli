@@ -21,14 +21,6 @@
 /.direnv/
 .direnv
 
-# Nix build outputs
-/result
-/result-*
-/*.drv
-/*.out
-/nix
-/nix-result
-
 # Editor and workspace junk
 *.swp
 *.swo

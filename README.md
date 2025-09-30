@@ -67,26 +67,26 @@ The code is organized so that the regression engine can live in `regression.rs` 
 
 ## Roadmap
 
-1. **Implement the solver core**
-   - Add an `ndarray`-based design matrix builder.
-   - Support closed-form OLS and regularized solutions (ridge via normal equations, lasso via coordinate descent or an external crate).
-2. **Feature scaling pipeline**
-   - Honor `--normalize` by computing column means/standard deviations.
-   - Persist scaling parameters so predictions can re-use the same transformations.
-3. **Model metrics and diagnostics**
+1. **Model metrics and diagnostics**
    - Compute R², adjusted R², RMSE, MAE, and residual summaries.
    - Generate leverage and influence diagnostics for OLS.
-4. **Config and experiment management**
+2. **Config and experiment management**
    - Support loading hyperparameters from `toml`/`yaml` configs in addition to CLI flags.
    - Emit machine-readable reports (JSON) for downstream tooling.
-5. **Prediction mode**
+3. **Prediction mode**
    - Allow loading a trained model artifact and applying it to new data.
    - Surface prediction intervals where applicable.
-6. **Testing and quality gates**
+4. **Testing and quality gates**
    - Add property-based tests for the solver.
    - Introduce integration fixtures with synthetic datasets to guard against regressions.
-7. **Developer ergonomics**
+5. **Developer ergonomics**
    - Add `cargo xtask` commands for sample data generation and benchmark runs.
    - Package the binary via `cargo install` and provide release artifacts.
+6. **Cross-validation and model selection**
+   - Add k-fold cross-validation to estimate generalization error.
+   - Provide grid/random search helpers for tuning regularization strengths.
+7. **CLI UX enhancements**
+   - Offer interactive prompts for column selection when flags are omitted.
+   - Support templated report output (markdown/HTML) for easier sharing.
 
 Contributions and refinements to this roadmap are welcome as requirements solidify.

@@ -10,6 +10,7 @@ serde = { version = "1", features = ["derive"] }
 chrono = "0.4"
 anyhow = "1"
 clap = { version = "4.5", features = ["derive"] }
+nalgebra = { version = "0.32", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "time", "test-util"] }
