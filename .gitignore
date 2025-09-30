@@ -1,0 +1,36 @@
+# Rust build artifacts
+/target/
+**/Cargo.lock.bak
+**/*.rlib
+**/*.rmeta
+**/*.d
+**/*.dSYM
+**/*.pdb
+**/*.profraw
+**/*.profdata
+**/*.gcda
+**/*.gcno
+**/*.gcov
+**/*.rs.bk
+
+# Cargo tooling caches
+/.cargo/
+/.rustup/
+
+# Direnv environment folders
+/.direnv/
+.direnv
+
+# Nix build outputs
+/result
+/result-*
+/*.drv
+/*.out
+/nix
+/nix-result
+
+# Editor and workspace junk
+*.swp
+*.swo
+*.tmp
+*.log
