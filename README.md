@@ -1,112 +1,204 @@
 # OLS CLI
 
-OLS CLI is a work-in-progress command line tool for running ordinary least squares and closely related regression models directly from your terminal. The goal is to streamline exploratory modeling on CSV datasets without needing to open a notebook or spreadsheet.
+OLS CLI is a command-line companion for fast experimentation with ordinary least squares (OLS) and closely related linear models. Point the tool at a headered CSV, choose which columns represent the target and the predictors, and it will take care of validation, preprocessing, solving, diagnostics, and reporting in a single run.
 
-> ⚠️ The solver is not implemented yet. The current scaffold validates input, inspects the dataset, and produces a structured report placeholder so you can iterate on the UX while the math pipeline is built out.
+## Capabilities
 
-## Getting Started
+- Fit **linear**, **ridge**, or **lasso** regression without leaving the terminal.
+- Optional feature normalization to zero mean and unit variance.
+- Automatic handling of intercept terms for every model.
+- Safe defaults for regularization hyperparameters with the option to override.
+- Rich text report that includes coefficients, fit metrics, residual summary, and leverage/Cook's distance diagnostics for OLS.
+- Persist reports to disk for later review.
+- Guard rails for common data-quality pitfalls (missing columns, non-numeric cells, zero-variance predictors, constant targets).
 
-### Prerequisites
+## Requirements
 
-- Rust 1.75+ (edition 2021)
-- CSV dataset with headers that include your target column and one or more feature columns
+- Rust 1.75 or newer.
+- CSV dataset with:
+  - A header row.
+  - Numeric values in the target and feature columns.
+  - At least one row of observations.
+- All selected feature columns must exhibit variance; columns that stay constant across the dataset are rejected to protect downstream math.
 
-### Running the CLI
+## Installation
 
 ```bash
-cargo run -- fit data/example.csv --target price --features bedrooms,bathrooms,area --model ridge --alpha 0.75 --normalize
+git clone https://github.com/<your-org>/ols-cli
+cd ols-cli
+cargo build
 ```
 
-Use `--dry-run` to preview configuration without touching the dataset:
+The crate builds as a binary; running through `cargo run` is recommended during development.
+
+## Quick Start
+
+1. Inspect the dataset to decide the target column (the value you want to predict) and the feature columns (independent variables).
+2. Run the CLI with the `fit` subcommand:
+
+   ```bash
+   cargo run -- fit data/boston_housing/housing_sample.csv \
+     --target price \
+     --features bedrooms,bathrooms,sqft,age \
+     --model linear
+   ```
+
+3. Review the configuration echo and the generated regression report. The report is printed to stdout and can optionally be saved to a file using `--output`.
+
+4. Iterate by swapping model types, adjusting alphas, or toggling normalization until you are satisfied with the fit.
+
+### Using the bundled fixtures
+
+The `data/` directory ships with three curated CSVs that exercise different solver behaviors:
+
+- `data/boston_housing/housing_sample.csv`: OLS baseline with multiple predictors.
+- `data/energy_efficiency/process_yield.csv`: Stable example where normalization and ridge regularization help with collinearity.
+- `data/marketing_mix/ad_performance.csv`: Illustrates sparse coefficients when running lasso.
+
+Try a ridge fit with normalization:
 
 ```bash
-cargo run -- fit data/example.csv --target price --features bedrooms,bathrooms --dry-run
+cargo run -- fit data/energy_efficiency/process_yield.csv \
+  --target yield \
+  --features temperature,pressure,catalyst,time_on_stream \
+  --model ridge \
+  --alpha 2.0 \
+  --normalize
 ```
 
-> Tip: `--features` accepts a comma-separated list; quote the argument if your shell treats commas specially.
+## CLI Usage
 
-### Expected Output
+Run `cargo run -- --help` to see global help and `cargo run -- fit --help` for subcommand details. The most important flags are documented below.
 
-The current implementation prints a configuration summary followed by a report stub that details:
+| Flag | Alias | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `DATASET` | – | ✅ (positional) | – | Path to the input CSV file. Must exist unless `--dry-run` is used. |
+| `--target <NAME>` | `-t` | ✅ | – | Column to predict. Must exist in the header. |
+| `--features <A,B,C>` | `-f` | ✅ | – | Comma-separated list of feature columns. Duplicates are rejected. |
+| `--model <linear|ridge|lasso>` | – | ❌ | `linear` | Regression algorithm. |
+| `--alpha <VALUE>` | – | Conditional | Omitted | Regularization strength. Required for ridge and lasso unless defaults apply. |
+| `--normalize` | – | ❌ | `false` | Normalize each feature to zero mean / unit variance prior to fitting. |
+| `--output <PATH>` | `-o` | ❌ | – | Persist the textual report to disk alongside console output. |
+| `--dry-run` | – | ❌ | `false` | Validate arguments and dataset schema without running the solver. |
 
-- Model variant in use (linear, ridge, lasso)
-- Number of rows detected in the dataset
-- Feature and target column names
-- Residual summary statistics and top leverage/Cook's distance scores (OLS only)
-- Notes highlighting missing functionality or inferred defaults
+### How default alphas work
 
-If you pass `--output path/to/report.txt`, the same report is written to disk.
+- Ridge regression defaults to `alpha = 1.0` when `--alpha` is omitted.
+- Lasso regression defaults to `alpha = 0.5` when `--alpha` is omitted.
+- Linear regression ignores alpha entirely.
 
-## Sample Data
+Specify an explicit value when you want to explore alternative regularization strengths.
 
-A `data/` directory contains small, numerically stable CSV fixtures you can run through the CLI while the solver is under construction:
+### Normalization details
 
-- `data/boston_housing/housing_sample.csv` - residential pricing snapshot with `price` as the target. Try linear regression:
-  ```bash
-  cargo run -- fit data/boston_housing/housing_sample.csv --target price --features bedrooms,bathrooms,sqft,age --model linear
-  ```
-- `data/energy_efficiency/process_yield.csv` - synthetic process data that benefits from ridge regularization and normalization:
-  ```bash
-  cargo run -- fit data/energy_efficiency/process_yield.csv --target yield --features temperature,pressure,catalyst,time_on_stream --model ridge --alpha 2.0 --normalize
-  ```
-- `data/marketing_mix/ad_performance.csv` - marketing spend example highlighting sparse coefficients under lasso:
-  ```bash
-  cargo run -- fit data/marketing_mix/ad_performance.csv --target sales --features tv,radio,social,email --model lasso --alpha 0.4
-  ```
+When `--normalize` is provided, each feature is centered and scaled using statistics calculated across the dataset. The transformation is applied before solving, and the mean/std-dev per feature are captured in the report under the “Normalization” section and echoed as a note.
 
-Each dataset is intentionally small (6–8 rows) so you can inspect the CSVs, tweak feature sets, and exercise different code paths like normalization, explicit alphas, and per-model notes without a lengthy run.
+### Dry runs
 
-## Command Reference
+Use `--dry-run` to confirm flag values and dataset accessibility without executing the math pipeline. This is especially useful in scripts or CI jobs where the dataset might not yet be staged.
 
-`fit`
-- `DATASET` (positional): Path to a CSV file with headers
-- `--target, -t <COLUMN>`: Name of the target column
-- `--features, -f <COLUMNS>`: Comma-separated list of feature columns
-- `--model <linear|ridge|lasso>`: Regression variant (default `linear`)
-- `--alpha <ALPHA>`: Regularization strength for ridge/lasso (optional; defaults applied when omitted)
-- `--normalize`: Request feature normalization (no-op for now)
-- `--output <PATH>`: Persist the report to disk
-- `--dry-run`: Validate inputs and print configuration only
+```bash
+cargo run -- fit data/boston_housing/housing_sample.csv \
+  --target price \
+  --features bedrooms,bathrooms \
+  --dry-run
+```
 
-Run `cargo run -- --help` to view global help and `cargo run -- fit --help` for command-specific examples.
+## Example Output
 
-## Project Layout
+```
+--> Configuration
+Model: ordinary least squares
+Dataset: data/boston_housing/housing_sample.csv
+Target: price
+Features: bedrooms, bathrooms, sqft, age
+Normalization: disabled
+alpha = n/a
 
-- `src/main.rs` ties the binary entry point to the library crate.
-- `src/cli.rs` defines the Clap-powered interface.
-- `src/config.rs` converts CLI arguments into a validated runtime configuration and fills default hyperparameters.
-- `src/regression/` contains preprocessing, solver, diagnostics, and reporting modules.
+--> Report
+Model: ordinary least squares
+Rows: 8
+Target: price
+Features: bedrooms, bathrooms, sqft, age
+Generated at: 2025-09-30T19:24:16Z
+Alpha: n/a
 
-The code is organized so that regression logic stays in `src/regression/` while CLI/UX layers remain separate.
+Metrics:
+  R^2: 0.992554
+  Adjusted R^2: 0.982625
+  RMSE: 7591.695482
+  MAE: 6212.132656
+
+Residuals:
+  Mean: -0.000000
+  Std Dev: 7591.695482
+  Min: -14855.808844
+  Max: 8494.369679
+  Max |residual|: 14855.808844
+
+Coefficients:
+  intercept       115415.545180
+  bedrooms        55639.659434
+  bathrooms       -96607.250755
+  sqft              236.503708
+  age             -2851.139797
+
+Influence diagnostics (OLS):
+  Leverage threshold: 0.990000
+  Row   5 leverage: 1.000000
+  Row   4 leverage: 0.808775
+  Row   6 leverage: 0.728921
+  Cook's distance threshold: 0.500000
+  Row   5 Cook's D: 2920.030927
+  Row   4 Cook's D: 2.076752
+  Row   1 Cook's D: 0.234031
+```
+
+### Interpreting the report
+
+- **Metrics**: Core goodness-of-fit metrics (R², adjusted R² when degrees of freedom allow, RMSE, MAE).
+- **Residuals**: Summary statistics for prediction errors to spot skewness or outliers.
+- **Coefficients**: Intercept followed by each feature in the order provided. Values correspond to the normalized space when `--normalize` is active.
+- **Influence diagnostics**: Available for OLS fits when leverage and Cook's distance are well-defined. Top entries surface potential outliers or high-influence points.
+- **Notes**: Additional context such as normalization or model-specific solver details. Expect a note when diagnostics cannot be computed (e.g., too few rows or a singular design matrix).
+
+## Validation & Error Handling
+
+The CLI fails fast with actionable messages when:
+
+- The dataset path does not exist (unless `--dry-run` is set).
+- Required columns are missing from the header.
+- Numeric parsing fails for any selected column.
+- A feature column has zero variance.
+- The target column is constant, making regression undefined.
+
+These checks are also covered by automated tests built around synthetic CSVs to keep confidence high.
 
 ## Development Workflow
 
-1. `cargo fmt` to keep formatting consistent.
-2. `cargo check` for a fast sanity pass.
-3. Add targeted unit or integration tests as solver pieces come online.
+- `cargo fmt` – ensure formatting matches repository style.
+- `cargo check` – quick type-check before committing.
+- `cargo test` – runs unit tests across preprocessing, solver logic, and end-to-end fit scenarios using synthetic data.
 
-## Roadmap
+The `tests` suite simulates edge cases such as zero-variance predictors, default alpha selection, and lasso shrinkage to catch regressions early.
 
-1. **Config and experiment management**
-   - Support loading hyperparameters from `toml`/`yaml` configs in addition to CLI flags.
-   - Emit machine-readable reports (JSON) for downstream tooling.
-2. **Prediction mode**
-   - Allow loading a trained model artifact and applying it to new data.
-   - Surface prediction intervals where applicable.
-3. **Testing and quality gates**
-   - Add property-based tests for the solver.
-   - Introduce integration fixtures with synthetic datasets to guard against regressions.
-4. **Developer ergonomics**
-   - Add `cargo xtask` commands for sample data generation and benchmark runs.
-   - Package the binary via `cargo install` and provide release artifacts.
-5. **Cross-validation and model selection**
-   - Add k-fold cross-validation to estimate generalization error.
-   - Provide grid/random search helpers for tuning regularization strengths.
-6. **CLI UX enhancements**
-   - Offer interactive prompts for column selection when flags are omitted.
-   - Support templated report output (markdown/HTML) for easier sharing.
-7. **Diagnostics visualization**
-   - Stream residual, leverage, and Cook's distance tables to CSV for quick plotting.
-   - Provide opt-in ASCII sparkline summaries for at-a-glance trend inspection.
+## Project Layout
 
-Contributions and refinements to this roadmap are welcome as requirements solidify.
+- `src/main.rs` – binary entry point.
+- `src/cli.rs` – Clap-powered CLI definitions.
+- `src/config.rs` – runtime configuration, defaults, and validation.
+- `src/regression/preprocess.rs` – CSV parsing, normalization statistics, and design matrix construction.
+- `src/regression/solve.rs` – linear, ridge, and lasso solvers plus metrics.
+- `src/regression/diagnostics.rs` – residual summaries and influence calculations for OLS.
+- `src/regression/report.rs` – report struct and renderer.
+- `src/regression/mod.rs` – orchestration glue that wires preprocessing, solving, diagnostics, and reporting together.
+
+## Roadmap Ideas
+
+- Config file support (TOML/JSON/YAML) for repeatable experiments.
+- JSON/CSV report emitters alongside the human-readable format.
+- Prediction-only mode backed by persisted coefficients.
+- Cross-validation helpers for hyperparameter search.
+- Additional diagnostics (variance inflation, residual plots, ASCII sparklines).
+
+Feedback and contributions are welcome—open an issue with ideas or questions as you explore the CLI.
