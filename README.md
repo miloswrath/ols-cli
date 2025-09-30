@@ -75,7 +75,7 @@ Run `cargo run -- --help` to see global help and `cargo run -- fit --help` for s
 | `DATASET` | – | ✅ (positional) | – | Path to the input CSV file. Must exist unless `--dry-run` is used. |
 | `--target <NAME>` | `-t` | ✅ | – | Column to predict. Must exist in the header. |
 | `--features <A,B,C>` | `-f` | ✅ | – | Comma-separated list of feature columns. Duplicates are rejected. |
-| `--model <linear|ridge|lasso>` | – | ❌ | `linear` | Regression algorithm. |
+| `--model <linear\|ridge\|lasso>` | – | ❌ | `linear` | Regression algorithm. |
 | `--alpha <VALUE>` | – | Conditional | Omitted | Regularization strength. Required for ridge and lasso unless defaults apply. |
 | `--normalize` | – | ❌ | `false` | Normalize each feature to zero mean / unit variance prior to fitting. |
 | `--output <PATH>` | `-o` | ❌ | – | Persist the textual report to disk alongside console output. |
